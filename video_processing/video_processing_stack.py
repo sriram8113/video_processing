@@ -7,11 +7,11 @@ from aws_cdk import (
     aws_events_targets as targets,
     aws_lambda_event_sources as sources,
     Duration,
-    Stack
+    Stack, 
+    Size
 )
 from constructs import Construct
 from aws_cdk import aws_s3_notifications as s3_notifications
-from aws_cdk.aws_lambda import EphemeralStorage , Size
 
 
 class VideoProcessingStack(Stack):
@@ -76,28 +76,35 @@ class VideoProcessingStack(Stack):
             )
         )
 
-
-        layer_psycopg2 = lambda_.LayerVersion.from_layer_version_arn(
-            self, "Psycopg2Layer",
-            layer_version_arn="arn:aws:lambda:us-east-1:050451400714:layer:psycopg2:3"
+                # Define Lambda layers using local zip files
+        layer_ffmpeg = lambda_.LayerVersion(self, "FFmpegLayer",
+            code=lambda_.Code.from_asset("layers/ffmpeg.zip"),
+            compatible_runtimes=[lambda_.Runtime.PYTHON_3_9],
+            description="FFmpeg utilities layer",
+            layer_version_name="ffmpeg"
         )
 
-        layer_db_utils = lambda_.LayerVersion.from_layer_version_arn(
-            self, "DbUtilsLayer",
-            layer_version_arn="arn:aws:lambda:us-east-1:050451400714:layer:db_utils:1"
+        layer_ffprobe = lambda_.LayerVersion(self, "FFprobeLayer",
+            code=lambda_.Code.from_asset("layers/ffprobe.zip"),
+            compatible_runtimes=[lambda_.Runtime.PYTHON_3_9],
+            description="FFprobe utilities layer",
+            layer_version_name="ffprobe"
         )
 
-        layer_ffmpeg = lambda_.LayerVersion.from_layer_version_arn(
-            self, "FFmpegLayer",
-            layer_version_arn="arn:aws:lambda:us-east-1:050451400714:layer:ffmpeg:1"
+        layer_psycopg2 = lambda_.LayerVersion(self, "Psycopg2Layer",
+            code=lambda_.Code.from_asset("layers/python.zip"),
+            compatible_runtimes=[lambda_.Runtime.PYTHON_3_9],
+            description="Psycopg2 layer for PostgreSQL database access",
+            layer_version_name="psycopg2"
         )
 
-        layer_ffprobe = lambda_.LayerVersion.from_layer_version_arn(
-            self, "FFprobeLayer",
-            layer_version_arn="arn:aws:lambda:us-east-1:050451400714:layer:ffprobe:1"
+        layer_db_utils = lambda_.LayerVersion(self, "DbUtilsLayer",
+            code=lambda_.Code.from_asset("layers/db_utils_layer.zip"),
+            compatible_runtimes=[lambda_.Runtime.PYTHON_3_9],
+            description="Database utilities layer",
+            layer_version_name="db_utils"
         )
-
-        
+ 
 
         # Environment variables for the bucket and database
         environment_vars = {
@@ -163,7 +170,7 @@ class VideoProcessingStack(Stack):
             role=lambda_role,
             timeout=Duration.seconds(900),
             memory_size=3000,  # Increase memory to 3 GB
-            ephemeral_storage_size=EphemeralStorage.size(Size.gibibytes(10)),  
+            ephemeral_storage_size=Size.gibibytes(2),
             environment= environment_vars
         )
         video_processing_lambda.add_event_source(sources.SqsEventSource(
@@ -211,7 +218,7 @@ class VideoProcessingStack(Stack):
         # EventBridge Rule for Retry Lambda
         retry_rule = events.Rule(
             self, "RetryScheduleRule",
-            schedule=events.Schedule.cron(minute="*/30")  # Every 5 minutes
+            schedule=events.Schedule.cron(minute="0 6 * * ? *") # Run every day at 6:00 AM
         )
 
         retry_rule.add_target(targets.LambdaFunction(retry_lambda))

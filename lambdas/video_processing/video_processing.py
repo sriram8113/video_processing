@@ -25,8 +25,8 @@ def process_video(input_path, output_path):
     """
     try:
         command = [
-            '/opt/ffmpeglib/ffmpeg', '-i', input_path, '-vf', 'transpose=1, crop=426:240',
-            '-c:v', 'libx264', '-crf', '23', '-preset', 'fast', output_path
+            '/opt/ffmpeglib/ffmpeg', '-i', input_path, '-vf', 'transpose=1, crop=240:240',
+             output_path
         ]
         subprocess.run(command, check=True)
         print(f"Video processed successfully: {output_path}")
