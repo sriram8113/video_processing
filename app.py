@@ -1,7 +1,5 @@
-#!/usr/bin/env python3
-import os
-
 import aws_cdk as cdk
+import os
 
 from video_processing.video_processing_stack import VideoProcessingStack
 
