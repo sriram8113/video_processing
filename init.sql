@@ -48,3 +48,11 @@ CREATE TABLE retry_status (
     last_retry_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- Last retry attempt timestamp
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- Record creation time
 );
+
+
+
+CREATE TABLE dlq_messages (
+    id SERIAL PRIMARY KEY,
+    message_body TEXT,
+    receive_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

@@ -3,8 +3,12 @@ from aws_cdk import (
     aws_iam as iam,
     aws_s3 as s3,
     aws_sqs as sqs,
+    aws_sns as sns,
     aws_events as events,
     aws_events_targets as targets,
+    aws_cloudwatch as cloudwatch,
+    aws_cloudwatch_actions as cw_actions,
+    aws_sns_subscriptions as subscriptions,
     aws_lambda_event_sources as sources,
     Duration,
     Stack, 
@@ -12,6 +16,8 @@ from aws_cdk import (
 )
 from constructs import Construct
 from aws_cdk import aws_s3_notifications as s3_notifications
+
+
 
 
 class VideoProcessingStack(Stack):
@@ -76,7 +82,7 @@ class VideoProcessingStack(Stack):
             )
         )
 
-                # Define Lambda layers using local zip files
+        # Define Lambda layers using local zip files
         layer_ffmpeg = lambda_.LayerVersion(self, "FFmpegLayer",
             code=lambda_.Code.from_asset("layers/ffmpeg.zip"),
             compatible_runtimes=[lambda_.Runtime.PYTHON_3_9],
@@ -104,6 +110,15 @@ class VideoProcessingStack(Stack):
             description="Database utilities layer",
             layer_version_name="db_utils"
         )
+
+        notification_topic = sns.Topic(
+            self, "NotificationTopic",
+            display_name="Lambda Error Notifications"
+        )
+
+        # Subscribe an email to the SNS Topic
+        email = "sriram.reddy.dev@gmail.com"  # Replace with your email address
+        notification_topic.add_subscription(subscriptions.EmailSubscription(email))
  
 
         # Environment variables for the bucket and database
@@ -112,7 +127,7 @@ class VideoProcessingStack(Stack):
             'FAILED_FOLDER': "failed/",
             'UPLOAD_FOLDER': "uploads/",
             'PROCESSED_FOLDER': "processed/",
-            'SNS_TOPIC_ARN': "arn:aws:sns:us-east-1:050451400714:VideoProcessingNotifications",
+            'SNS_TOPIC_ARN': notification_topic.topic_arn,
             "DB_HOST": "database-2.cq74ikq28hgi.us-east-1.rds.amazonaws.com",
             "DB_NAME": "videodb",
             "DB_USER": "postgres",
@@ -206,6 +221,19 @@ class VideoProcessingStack(Stack):
             timeout=Duration.seconds(300),
             environment= environment_vars
         )
+        
+
+        # storing error messages Lambda 
+        dlq_queue_storage_lambda = lambda_.Function(
+            self, "DlqQueueStorageLambda",
+            runtime=lambda_.Runtime.PYTHON_3_9,
+            handler="dlq_queue_storage.lambda_handler",
+            code=lambda_.Code.from_asset("lambdas/dlq_queue_storage"),
+            layers=[layer_psycopg2, layer_db_utils], 
+            role=lambda_role,
+            timeout=Duration.seconds(300),
+            environment= environment_vars
+        )
 
 
         # S3 Event Notification to Trigger Workflow Queue
@@ -216,10 +244,45 @@ class VideoProcessingStack(Stack):
         )
 
         # EventBridge Rule for Retry Lambda
+        # Correct way
+        # Correct way using AWS CDK syntax
         retry_rule = events.Rule(
             self, "RetryScheduleRule",
-            schedule=events.Schedule.cron(minute="0 6 * * ? *") # Run every day at 6:00 AM
+            schedule=events.Schedule.cron(
+                minute="0",
+                hour="12",
+                day="*",
+                month="*",
+                year="*"
+            )
         )
 
         retry_rule.add_target(targets.LambdaFunction(retry_lambda))
+
+
+        lambda_functions = {
+            'MetadataCheckLambda': metadata_check_lambda,
+            'QualityCheckLambda': quality_check_lambda,
+            'VideoProcessingLambda': video_processing_lambda,
+            'NotificationLambda': notification_lambda,
+            'RetryLambda': retry_lambda,
+            'DlqQueueStorageLambda': dlq_queue_storage_lambda
+        }
+
+        for name, lambda_function in lambda_functions.items():
+            alarm = cloudwatch.Alarm(
+                self, f"{name}ErrorAlarm",
+                metric=lambda_function.metric_errors(),
+                evaluation_periods=1,
+                threshold=1,
+                comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+                alarm_description=f"Alarm when {name} has errors",
+                treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
+            )
+
+            # Adding SNS topic as a notification target for the alarm using existing topic ARN
+            alarm.add_alarm_action(cw_actions.SnsAction(
+                sns.Topic.from_topic_arn(self, f"{name}NotificationTopic", topic_arn=environment_vars['SNS_TOPIC_ARN'])
+            ))
+
 
