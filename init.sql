@@ -56,3 +56,41 @@ CREATE TABLE dlq_messages (
     message_body TEXT,
     receive_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+
+-- DROP FUNCTION public.get_counts(timestamp, timestamp);
+
+CREATE OR REPLACE FUNCTION public.get_counts(begin_time timestamp without time zone, end_time timestamp without time zone)
+ RETURNS TABLE(total_videos bigint, metadata_present_count bigint, corruption_checks_passed_count bigint, has_audio_count bigint, has_video_count bigint, notifications_sent_count bigint)
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    RETURN QUERY
+    SELECT COUNT(*) AS total_videos,
+           COUNT(*) FILTER (WHERE metadata_present = 'true') AS metadata_present_count,
+           COUNT(*) FILTER (WHERE corruption_check = 'true') AS corruption_checks_passed_count,
+           COUNT(*) FILTER (WHERE has_audio = 'true') AS has_audio_count,
+           COUNT(*) FILTER (WHERE has_video = 'true') AS has_video_count,
+           COUNT(*) FILTER (WHERE notification_sent = 'true') AS notifications_sent_count
+    FROM video_processing_status
+    WHERE s3_arrival_time BETWEEN begin_time AND end_time;
+END;
+$function$
+;
+
+
+-- DROP FUNCTION public.get_video_details(timestamp, timestamp);
+
+CREATE OR REPLACE FUNCTION public.get_video_details(begin_time timestamp without time zone, end_time timestamp without time zone)
+ RETURNS TABLE(video_key character varying, s3_arrival_time timestamp without time zone, metadata_present character varying, corruption_check character varying, has_audio character varying, has_video character varying, quality_rating integer, processing_status character varying, notification_sent character varying, arrival_time timestamp without time zone, last_updated timestamp without time zone)
+ LANGUAGE plpgsql
+AS $function$
+BEGIN
+    RETURN QUERY
+    SELECT v.video_key, v.s3_arrival_time, v.metadata_present, v.corruption_check, v.has_audio, 
+           v.has_video, v.quality_rating, v.processing_status, v.notification_sent, v.arrival_time, v.last_updated
+    FROM video_processing_status v
+    WHERE v.s3_arrival_time BETWEEN begin_time AND end_time;
+END;
+$function$
+;

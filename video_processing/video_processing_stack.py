@@ -16,6 +16,8 @@ from aws_cdk import (
 )
 from constructs import Construct
 from aws_cdk import aws_s3_notifications as s3_notifications
+from aws_cdk import aws_apigateway as apigateway
+
 
 
 
@@ -258,6 +260,43 @@ class VideoProcessingStack(Stack):
         )
 
         retry_rule.add_target(targets.LambdaFunction(retry_lambda))
+
+        # Define unique names for each Lambda function
+        details_lambda_id = "FetchVideoDetailsLambda1" 
+        count_lambda_id = "GetCountFromDbLambda1"
+            
+        # Lambda function for getting video details
+        get_details_lambda = lambda_.Function(
+            self, details_lambda_id,
+            runtime=lambda_.Runtime.PYTHON_3_9,
+            handler="get_details_api.lambda_handler",
+            code=lambda_.Code.from_asset("lambdas/get_details_api"),
+            layers=[layer_psycopg2, layer_db_utils],
+            role=lambda_role,
+            environment=environment_vars
+        )
+
+        # Lambda function for getting count details
+        get_count_lambda = lambda_.Function(
+            self, count_lambda_id,
+            runtime=lambda_.Runtime.PYTHON_3_9,
+            handler="get_count_api.lambda_handler",
+            code=lambda_.Code.from_asset("lambdas/get_count_api"),
+            layers=[layer_psycopg2, layer_db_utils],
+            role=lambda_role,
+            environment=environment_vars
+        )
+
+
+        # Create API Gateway resources and methods as before
+        api = apigateway.RestApi(self, "VideoProcessingApi")
+
+        details_resource = api.root.add_resource("details")
+        details_resource.add_method("GET", apigateway.LambdaIntegration(get_details_lambda))
+
+        count_resource = api.root.add_resource("count")
+        count_resource.add_method("GET", apigateway.LambdaIntegration(get_count_lambda))    
+
 
 
         lambda_functions = {
