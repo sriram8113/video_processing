@@ -16,8 +16,7 @@ This setup is ideal for organizations looking to manage large volumes of video c
 
 # Architechture
 
-![alt text](Video_Processing_piepline.drawio.png)
-
+![alt text](Architechture.drawio.png)
 
 # Technologies and Libraries
 

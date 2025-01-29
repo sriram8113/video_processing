@@ -152,7 +152,7 @@ class VideoProcessingStack(Stack):
             code=lambda_.Code.from_asset("lambdas/metadata_check"),
             layers=[layer_psycopg2, layer_db_utils, layer_ffmpeg, layer_ffprobe], 
             role=lambda_role,
-            timeout=Duration.seconds(300),
+            timeout=Duration.seconds(900),
             environment= environment_vars
 
         )
@@ -170,6 +170,8 @@ class VideoProcessingStack(Stack):
             layers=[layer_psycopg2, layer_db_utils, layer_ffmpeg, layer_ffprobe], 
             role=lambda_role,
             timeout=Duration.seconds(900),
+            memory_size=3008,  # Increase memory to 3 GB
+            ephemeral_storage_size=Size.gibibytes(3),
             environment= environment_vars
         )
         quality_check_lambda.add_event_source(sources.SqsEventSource(
@@ -187,7 +189,7 @@ class VideoProcessingStack(Stack):
             role=lambda_role,
             timeout=Duration.seconds(900),
             memory_size=3000,  # Increase memory to 3 GB
-            ephemeral_storage_size=Size.gibibytes(2),
+            ephemeral_storage_size=Size.gibibytes(3),
             environment= environment_vars
         )
         video_processing_lambda.add_event_source(sources.SqsEventSource(
@@ -195,8 +197,7 @@ class VideoProcessingStack(Stack):
             batch_size=1  # Process one file at a time
         ))
 
-        # Notification Lambda
-            # Notification Lambda corrected with closing parenthesis
+        # Notification Lambda corrected with closing parenthesis
         notification_lambda = lambda_.Function(
             self, "NotificationLambda",
             runtime=lambda_.Runtime.PYTHON_3_9,
@@ -204,7 +205,7 @@ class VideoProcessingStack(Stack):
             code=lambda_.Code.from_asset("lambdas/notification"),
             layers=[layer_psycopg2, layer_db_utils, layer_ffmpeg, layer_ffprobe], 
             role=lambda_role,
-            timeout=Duration.seconds(600),
+            timeout=Duration.seconds(900),
             environment=environment_vars
         )
         notification_lambda.add_event_source(sources.SqsEventSource(

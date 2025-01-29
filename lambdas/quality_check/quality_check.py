@@ -57,12 +57,12 @@ def process_quality_check(video_file_key, s3_arrival_time):
 
     try:
         corruption_check = check_video_corruption(local_video_path)
-        has_audio, has_video = check_blank_content(local_video_path)
+        has_audio, has_video, audio_stats = check_blank_content(local_video_path)
         size_check = check_file_size(local_video_path)
 
         print(f"Corruption Check: {corruption_check}, Audio: {has_audio}, Video: {has_video}, Size Check: {size_check}")
 
-        quality_rating = calculate_quality_rating(corruption_check, has_audio, has_video)
+        quality_rating = calculate_quality_rating(corruption_check, has_audio, has_video, audio_stats)
         save_results_to_db(video_file_key, s3_arrival_time, corruption_check, has_audio, has_video, quality_rating)
 
         if quality_rating >= 2 and size_check:
@@ -95,12 +95,12 @@ def check_video_corruption(video_path):
         print("Video corruption detected.")
         return False
 
-
 def check_blank_content(video_path):
     """
-    Checks for blank content (missing audio or video streams) using FFmpeg.
-    Returns a tuple (has_audio, has_video) indicating the presence of streams.
+    Checks for blank content and measures audio loudness.
+    Returns tuple (has_audio, has_video, audio_stats) where audio_stats contains dB values.
     """
+    # Check for video/audio streams (original logic)
     result = subprocess.run(
         ['/opt/ffprobelib/ffprobe', '-i', video_path, '-show_streams', '-select_streams', 'v', '-loglevel', 'error'],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE
@@ -113,8 +113,40 @@ def check_blank_content(video_path):
     )
     has_audio = b"codec_type=audio" in result.stdout
 
-    print(f"Video stream: {'Found' if has_video else 'Not Found'}; Audio stream: {'Found' if has_audio else 'Not Found'}")
-    return has_audio, has_video
+    # New: Audio loudness measurement
+    audio_stats = {}
+    if has_audio:
+        ffmpeg_cmd = [
+            '/opt/ffmpeglib/ffmpeg',  # Update path if needed
+            '-i', video_path,
+            '-filter:a', 'volumedetect',
+            '-f', 'null',
+            '-'
+        ]
+        result = subprocess.run(
+            ffmpeg_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        
+        # Parse output for dB values
+        output = result.stderr.decode('utf-8')
+        audio_stats = {
+            'mean_volume': None,
+            'max_volume': None
+        }
+        
+        for line in output.split('\n'):
+            if 'mean_volume' in line:
+                audio_stats['mean_volume'] = float(line.split('mean_volume: ')[1].split(' dB')[0])
+            if 'max_volume' in line:
+                audio_stats['max_volume'] = float(line.split('max_volume: ')[1].split(' dB')[0])
+
+    print(f"Video: {'Found' if has_video else 'Missing'}, Audio: {'Found' if has_audio else 'Missing'}")
+    if has_audio:
+        print(f"Audio levels - Mean: {audio_stats.get('mean_volume')} dB, Max: {audio_stats.get('max_volume')} dB")
+    
+    return has_audio, has_video, audio_stats
 
 
 def check_file_size(video_path):
@@ -131,7 +163,7 @@ def check_file_size(video_path):
         return False
 
 
-def calculate_quality_rating(corruption_check, has_audio, has_video):
+def calculate_quality_rating(corruption_check, has_audio, has_video, audio_stats):
     """
     Calculates the quality rating based on the checks and quality of audio/video.
     """
@@ -142,14 +174,20 @@ def calculate_quality_rating(corruption_check, has_audio, has_video):
         return 0  # Blank video
 
     if not has_video and has_audio:
-        return 1  # No video but audio present
+        if is_audio_silent(audio_stats):
+            return 1  # No video and silent audio
+        else:
+            return 2  # No video but audio with sound
 
     if not has_audio and has_video:
-        return 2  # No audio but video present
+        return 3  # No audio but video present
 
     # Both streams present; evaluate quality
     if has_audio and has_video:
-        return 5  # Best quality
+        if is_audio_silent(audio_stats):
+            return 4  # Video with silent audio
+        else:
+            return 5  # Best quality (video and audio with sound)
 
     return 3  # Mixed quality
 
@@ -236,3 +274,15 @@ def move_to_failed_folder(video_file_key):
         else:
             print(f"Error moving files to failed folder: {e}")
             raise
+
+
+def is_audio_silent(audio_stats):
+    """
+    Determines if the audio is effectively silent based on mean and max volume.
+    """
+    if not audio_stats:
+        return True  # No audio stream
+    mean_volume = audio_stats.get('mean_volume', -float('inf'))
+    max_volume = audio_stats.get('max_volume', -float('inf'))
+    # Consider audio silent if mean and max are below a threshold (e.g., -60 dB)
+    return mean_volume < -60 and max_volume < -60
